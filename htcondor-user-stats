@@ -69,7 +69,7 @@ def basic_user_stats():
                 users[username]['image_size_total'] += int(ad['residentsetsize']) * 1024
             else:
                 users[username]['image_size_total'] += int(ad['imagesize']) * 1024
-            if int(ad['numshadowstarts']) == 1 and float(ad['remoteusercpu']) > 0 and time.time() - float(ad['jobcurrentstartdate']) > 45*60 and ad['match_glidein_site'] != "MIT":
+            if int(ad['numshadowstarts']) == 1 and float(ad['remoteusercpu']) > 0 and time.time() - float(ad['jobcurrentstartdate']) > 45*60:
                 users[username]['utilization_count'] += 1
                 #users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (float(ad['remotewallclocktime']) + time.time() - float(ad['jobcurrentstartdate'])) * 100
                 users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (time.time() - float(ad['jobcurrentstartdate'])) * 100

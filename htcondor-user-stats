@@ -1,0 +1,427 @@
+#!/usr/bin/python
+
+import os
+import re
+import sys
+import logging
+import tempfile
+import subprocess
+import stat
+import time
+import pwd
+
+
+
+# globals
+q = []
+schedd = []
+hist = []
+status = []
+submitters = ""
+prio = ""
+users = {}
+status_summary = ""
+
+logger = logging.getLogger("my_logger")
+console = logging.StreamHandler()
+logger.setLevel(logging.DEBUG)
+console.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s %(levelname)7s:  %(message)s")
+console.setFormatter(formatter)
+logger.addHandler(console)
+
+
+def create_user(username):
+    logger.info("Found new user: %s" %(username))
+    u = {}
+    u['job_count'] = 0
+    u['running_count'] = 0
+    u['job_starts_total'] = 0
+    u['shadow_starts_total'] = 0
+    u['running_total_time'] = 0
+    u['utilization_count'] = 0
+    u['utilization_total'] = 0
+    u['image_size_total'] = 0
+    u['hist_job_count'] = 0
+    u['hist_total_time'] = 0
+    u['hist_bytes_recvd_total'] = 0
+    u['hist_bytes_sent_total'] = 0
+    return u
+
+
+def basic_user_stats():
+    global users
+
+    for ad in q:
+
+        username = ad['owner']
+        if username not in users:
+            users[username] = create_user(username)
+
+        users[username]['job_count'] += 1
+   
+        # running jobs 
+        if 'jobstatus' in ad and 'numshadowstarts' in ad and ad['jobstatus'] == "2" and ad['jobuniverse'] == "5":
+            users[username]['running_count'] += 1
+            users[username]['job_starts_total'] += int(ad['numjobstarts'])
+            users[username]['shadow_starts_total'] += int(ad['numshadowstarts'])
+            if 'residentsetsize' in ad:
+                users[username]['image_size_total'] += int(ad['residentsetsize']) * 1024
+            else:
+                users[username]['image_size_total'] += int(ad['imagesize']) * 1024
+            if int(ad['numshadowstarts']) == 1 and float(ad['remoteusercpu']) > 0 and time.time() - float(ad['jobcurrentstartdate']) > 45*60 and ad['match_glidein_site'] != "MIT":
+                users[username]['utilization_count'] += 1
+                #users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (float(ad['remotewallclocktime']) + time.time() - float(ad['jobcurrentstartdate'])) * 100
+                users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (time.time() - float(ad['jobcurrentstartdate'])) * 100
+            if 'requestmemory' in ad and not 'ifThenElse' in ad['requestmemory']:
+                users[username]['request_memory'] = float(ad['requestmemory'])
+
+    for ad in hist:
+
+        username = ad['owner']
+        if username not in users:
+            users[username] = create_user(username)
+
+        # average run time and data transfer
+        if 'remotewallclocktime' in ad and ad['jobuniverse'] == "5":
+            users[username]['hist_job_count'] += 1
+            users[username]['hist_total_time'] += float(ad['remotewallclocktime'])
+
+            if 'bytesrecvd' in ad:
+                users[username]['hist_bytes_recvd_total'] += float(ad['bytesrecvd'])
+            
+            if 'bytesrecvd' in ad:
+                users[username]['hist_bytes_sent_total'] += float(ad['bytessent'])
+        
+    for username in users:
+        u = users[username]
+
+        logger.info("%s has %d jobs running" %(username, u['running_count']))
+
+        u['job_starts_average'] = 0
+        u['shadow_starts_average'] = 0
+        u['image_size_average'] = 0
+        u['utilization_average'] = -1
+        if u['running_count'] > 0:
+            u['job_starts_average'] = round(float(u['job_starts_total']) / float(u['running_count']))
+            u['shadow_starts_average'] = round(float(u['shadow_starts_total']) / float(u['running_count']))
+            u['image_size_average'] = round(float(u['image_size_total']) / float(u['running_count']))
+        if u['utilization_count'] > 0:
+            u['utilization_average'] = round(float(u['utilization_total']) / float(u['utilization_count']))
+
+        u['hist_average_time'] = 0
+        u['hist_bytes_recvd_average'] = 0
+        u['hist_bytes_sent_average'] = 0
+        if u['hist_job_count'] > 0:
+            u['hist_average_time'] = float(u['hist_total_time']) / float(u['hist_job_count'])
+            u['hist_bytes_recvd_average'] = float(u['hist_bytes_recvd_total']) / float(u['hist_job_count'])
+            u['hist_bytes_sent_average'] = float(u['hist_bytes_sent_total']) / float(u['hist_job_count'])
+
+        u['pred_rate_out'] = 0
+        if u['hist_average_time'] > 0:
+            u['pred_rate_out'] = 8 * u['running_count'] * u['hist_bytes_recvd_average'] / float(u['hist_average_time'])
+        
+        u['pred_rate_in'] = 0
+        if u['hist_average_time'] > 0:
+            u['pred_rate_in'] = 8 * u['running_count'] * u['hist_bytes_sent_average'] / float(u['hist_average_time'])
+
+        logger.info("Average job run time for %s is %d" %(username, u['hist_average_time']))
+        logger.info("Average bytes transfer to jobs for %s is %d" %(username, u['hist_bytes_recvd_average']))
+
+
+def find_schedds():
+
+    result = []
+
+    cmd = 'condor_status -schedd `hostname` -af name'
+
+    fd, fname = tempfile.mkstemp(prefix="osg-flock-", suffix="", dir="/tmp")
+    cmd = "%s >%s" % (cmd, fname)
+    p = subprocess.Popen(cmd, shell=True)
+    p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        raise RuntimeError("Command '%s' failed with error code %s" % (cmd, rc))
+
+    f_in = open(fname, "r")
+    for line in f_in:
+        result.append(line.strip())
+    f_in.close()
+    os.unlink(fname)
+
+    logger.info("%d local schedds found" %(len(result)))
+    return result
+
+
+def schedd_history_file(schedd):
+
+    # strip hostname part
+    schedd = re.sub('@.*', '', schedd)
+
+    cmd = 'condor_config_val SCHEDD.%s.HISTORY || condor_config_val HISTORY' %(schedd)
+
+    fd, fname = tempfile.mkstemp(prefix="osg-flock-", suffix="", dir="/tmp")
+    cmd = "(%s) >%s 2>/dev/null" % (cmd, fname)
+    p = subprocess.Popen(cmd, shell=True)
+    p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        raise RuntimeError("Command '%s' failed with error code %s" % (cmd, rc))
+
+    final_line = ""
+    f_in = open(fname, "r")
+    for line in f_in:
+        if len(line) > 3:
+            final_line = line.strip()
+    os.unlink(fname)
+
+    return final_line
+
+
+def pull_condor(name, cmd):
+
+    result = []
+
+    fd, fname = tempfile.mkstemp(prefix="condor-report-", suffix="", dir="/tmp")
+    cmd = "%s >%s" % (cmd, fname)
+    p = subprocess.Popen(cmd, shell=True)
+    p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        raise RuntimeError("Command '%s' failed with error code %s" % (cmd, rc))
+
+    ad = {}
+    f_in = open(fname, "r")
+    for line in f_in:
+        line = line.strip(" \r\n")
+        if line == "":
+            if len(ad) > 1:
+                result.append(ad)
+            ad = {}
+        elif line.find("=") > 0:
+            (key, value) = line.split("=", 1)
+            key = key.strip(" ").lower()
+            value = value.strip(" \"")
+            ad[key] = value
+    f_in.close()
+    os.unlink(fname)
+
+    logger.info("%s: %d ads imported" %(name, len(result)))
+    return result
+
+
+def formatted_time_period(seconds):
+    max_comp = 2
+    comp = 0
+    sec = int(seconds)
+    formatted_duration = ''
+    days = sec / 86400
+    sec -= 86400 * days
+    hrs = sec / 3600
+    sec -= 3600 * hrs
+    mins = sec / 60
+    sec -= 60 * mins
+
+    # days
+    if comp < max_comp and (days >= 1 or comp > 0):
+        comp += 1
+        if days == 1:
+            formatted_duration += str(days) + ' day, '
+        else:
+            formatted_duration += str(days) + ' days, '
+
+    # hours
+    if comp < max_comp and (hrs >= 1 or comp > 0):
+        comp += 1
+        if hrs == 1:
+            formatted_duration += str(hrs) + ' hr, '
+        else:
+            formatted_duration += str(hrs) + ' hrs, '
+
+    # mins
+    if comp < max_comp and (mins >= 1 or comp > 0):
+        comp += 1
+        if mins == 1:
+            formatted_duration += str(mins) + ' min, '
+        else:
+            formatted_duration += str(mins) + ' mins, '
+
+    # seconds
+    if comp < max_comp and (sec >= 1 or comp > 0):
+        comp += 1
+        if sec == 1:
+            formatted_duration += str(sec) + " sec, "
+        else:
+            formatted_duration += str(sec) + " secs, "
+
+    if formatted_duration[-2:] == ", ":
+        formatted_duration = formatted_duration[:-2]
+
+    if formatted_duration == '':
+        formatted_duration = "N/A"
+
+    return formatted_duration
+
+
+def formatted_bytes(bytes, base_unit="B"):
+    gb = int(bytes) / (1024 * 1024 * 1024)
+    mb = int(bytes) / (1024 * 1024)
+    kb = int(bytes) / (1024)
+
+    if bytes == 0:
+        return "N/A"
+
+    result = "%d %s" % (bytes, base_unit)
+
+    if gb > 0:
+        result = "%d G%s" %(gb, base_unit)
+    elif mb > 0:
+        result = "%d M%s" %(mb, base_unit)
+    elif kb > 0:
+        result = "%d K%s" %(kb, base_unit)
+
+    return result
+
+def users_cmp(a, b):
+    # high running counts first, then sort on usernames
+    if a['running_count'] > b['running_count']:
+        return -1
+    if a['running_count'] < b['running_count']:
+        return 1
+    # same number of jobs, sort on usernames
+    if a['username'] < b['username']:
+        return -1
+    if a['username'] > b['username']:
+        return 1
+    return 0
+
+def report():
+
+    f = open('htcondor-user-stats.html', 'w')
+
+    f.write("<p>Report generated %s</p>\n" %(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())))
+
+    f.write("<p><b>Note:</b> Highlighted items may or may not indicate an actual problem.</p>\n")
+
+    f.write("<h3>Users</h3>")
+    f.write("<table border='1' cellspacing='0' cellpadding='5'>\n")
+    f.write("<tr bgcolor='#cccccc'>\n")
+    f.write("<td rowspan='2'><b>Username</b></td>\n")
+    f.write("<td colspan='5'><b>Current</b></td>\n")
+    f.write("<td colspan='4'><b>Recent History</b></td>\n")
+    f.write("<td colspan='2'><b>Analysis</b></td>\n")
+    f.write("</tr>\n")
+    f.write("<tr bgcolor='#cccccc'>\n")
+    f.write("<td><b>Running jobs</b></td>\n")
+    f.write("<td><b>Average number of job starts</b></td>\n")
+    f.write("<td><b>Average number of shadow starts</b></td>\n")
+    f.write("<td><b>Average image size</b></td>\n")
+    f.write("<td><b>Average utilization</b></td>\n")
+    f.write("<td><b>History job count</b></td>\n")
+    f.write("<td><b>Average job run time</b></td>\n")
+    f.write("<td><b>Average data to job</b></td>\n")
+    f.write("<td><b>Average data from job</b></td>\n")
+    f.write("<td><b>Est. data rate out</b></td>\n")
+    f.write("<td><b>Est. data rate in</b></td>\n")
+    f.write("</tr>\n")
+    
+    # convert to a list for easy sorting
+    users_l = []
+    for k, v in users.items():
+        v['username'] = k
+        users_l.append(v)
+    users_sorted = sorted(users_l, cmp=users_cmp)
+
+    for u in users_sorted:
+        
+        f.write("<tr>\n")
+        f.write("<td>%s</td>\n" %(u['username']))
+        f.write("<td>%d</td>\n" %(u['running_count']))
+
+        f.write("<td")
+        if u['job_starts_average'] >= 2.5:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%.0f</td>\n" %(u['job_starts_average']))
+        
+        f.write("<td")
+        if u['shadow_starts_average'] >= 3.5:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%.0f</td>\n" %(u['shadow_starts_average']))
+
+        warn = u['image_size_average'] >= 1500000000
+        if 'request_memory' in u:
+            warn = u['image_size_average'] >= u['request_memory'] * 1024 * 1024
+        f.write("<td")
+        if warn:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%.1f&nbsp;GB" % (u['image_size_average'] / 1024 / 1024 / 1024))
+        if 'request_memory' in u:
+            f.write("&nbsp;(%.1f&nbsp;GB&nbsp;requested)" % (u['request_memory'] / 1024))
+        f.write("</td>\n")
+        
+        f.write("<td")
+        if u['utilization_average'] > 120:
+            f.write(" bgcolor='#ffee66'")
+        if u['utilization_average'] < 0:
+            f.write(">N/A")
+        else:
+            f.write(">%.1f%%</td>\n" % (u['utilization_average']))
+
+        f.write("<td")
+        if u['hist_job_count'] < 10:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%s</td>\n" % u['hist_job_count'])
+
+        f.write("<td")
+        if u['hist_job_count'] > 0 and u['hist_average_time'] > 0 and (u['hist_average_time'] < 15*60  or u['hist_average_time'] > 8*60*60):
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%s</td>\n" % formatted_time_period(u['hist_average_time']))
+
+        f.write("<td")
+        if u['hist_bytes_recvd_average'] > 500*1024*1024:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%s</td>\n" % formatted_bytes(u['hist_bytes_recvd_average']))
+        
+        f.write("<td")
+        if u['hist_bytes_sent_average'] > 500*1024*1024:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%s</td>\n" % formatted_bytes(u['hist_bytes_sent_average']))
+        
+        f.write("<td")
+        if u['pred_rate_out'] > 200*1024*1024:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%s</td>\n" % formatted_bytes(u['pred_rate_out'], "b/s"))
+        
+        f.write("<td")
+        if u['pred_rate_in'] > 200*1024*1024:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%s</td>\n" % formatted_bytes(u['pred_rate_in'], "b/s"))
+
+    f.write("</table>\n")
+
+    f.close()
+
+
+def main():
+    global q
+    global schedd
+    global hist
+    global status
+    global submitters
+    global prio
+    global status_summary
+
+    for schedd_name in find_schedds():
+        history_file = schedd_history_file(schedd_name)
+        q += pull_condor("queue", "/usr/bin/condor_q -name %s -long" %(schedd_name)) 
+        hist += pull_condor("history", "/usr/bin/condor_history -file %s -backwards -constraint 'CurrentTime - CompletionDate < 6*60*60' -match 5000 -l" %(history_file))
+        schedd += pull_condor("schedd", "/usr/bin/condor_status -schedd -l -constraint 'Name == \"%s\"'" %(schedd_name))
+    status = pull_condor("status", "/usr/bin/condor_status -l")
+
+    basic_user_stats()
+    report()
+
+
+
+main()
+

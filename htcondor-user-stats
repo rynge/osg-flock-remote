@@ -297,7 +297,7 @@ def users_cmp(a, b):
 
 def report():
 
-    f = open('htcondor-user-stats.html', 'w')
+    f = open('htcondor-user-stats.html.tmp', 'w')
 
     f.write("<p>Report generated %s</p>\n" %(time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())))
 
@@ -400,6 +400,7 @@ def report():
     f.write("</table>\n")
 
     f.close()
+    os.rename('htcondor-user-stats.html.tmp', 'htcondor-user-stats.html')
 
 
 def main():

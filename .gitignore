@@ -1,1 +1,4 @@
 *.html
+.cron.ts
+.git-update.ts
+

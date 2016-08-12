@@ -42,6 +42,7 @@ def create_user(username):
     u['utilization_count'] = 0
     u['utilization_total'] = 0
     u['image_size_total'] = 0
+    u['disk_usage_total'] = 0
     u['hist_job_count'] = 0
     u['hist_total_time'] = 0
     u['hist_bytes_recvd_total'] = 0
@@ -69,6 +70,8 @@ def basic_user_stats():
                 users[username]['image_size_total'] += int(ad['residentsetsize']) * 1024
             else:
                 users[username]['image_size_total'] += int(ad['imagesize']) * 1024
+            if 'diskusage' in ad:
+                users[username]['disk_usage_total'] += int(ad['diskusage']) * 1024
             if int(ad['numshadowstarts']) == 1 and float(ad['remoteusercpu']) > 0 and time.time() - float(ad['jobcurrentstartdate']) > 45*60:
                 users[username]['utilization_count'] += 1
                 #users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (float(ad['remotewallclocktime']) + time.time() - float(ad['jobcurrentstartdate'])) * 100
@@ -101,11 +104,13 @@ def basic_user_stats():
         u['job_starts_average'] = 0
         u['shadow_starts_average'] = 0
         u['image_size_average'] = 0
+        u['disk_usage_average'] = 0
         u['utilization_average'] = -1
         if u['running_count'] > 0:
             u['job_starts_average'] = round(float(u['job_starts_total']) / float(u['running_count']))
             u['shadow_starts_average'] = round(float(u['shadow_starts_total']) / float(u['running_count']))
             u['image_size_average'] = round(float(u['image_size_total']) / float(u['running_count']))
+            u['disk_usage_average'] = round(float(u['disk_usage_total']) / float(u['running_count']))
         if u['utilization_count'] > 0:
             u['utilization_average'] = round(float(u['utilization_total']) / float(u['utilization_count']))
 
@@ -316,6 +321,7 @@ def report():
     f.write("<td><b>Average number of job starts</b></td>\n")
     f.write("<td><b>Average number of shadow starts</b></td>\n")
     f.write("<td><b>Average image size</b></td>\n")
+    f.write("<td><b>Average disk usage</b></td>\n")
     f.write("<td><b>Average utilization</b></td>\n")
     f.write("<td><b>History job count</b></td>\n")
     f.write("<td><b>Average job run time</b></td>\n")
@@ -357,6 +363,13 @@ def report():
         f.write(">%.1f&nbsp;GB" % (u['image_size_average'] / 1024 / 1024 / 1024))
         if 'request_memory' in u:
             f.write("&nbsp;(%.1f&nbsp;GB&nbsp;requested)" % (u['request_memory'] / 1024))
+        f.write("</td>\n")
+        
+        warn = u['disk_usage_average'] >= 5000000000
+        f.write("<td")
+        if warn:
+            f.write(" bgcolor='#ffee66'")
+        f.write(">%.1f&nbsp;GB" % (u['disk_usage_average'] / 1024 / 1024 / 1024))
         f.write("</td>\n")
         
         f.write("<td")

@@ -312,7 +312,7 @@ def report():
     f.write("<table border='1' cellspacing='0' cellpadding='5'>\n")
     f.write("<tr bgcolor='#cccccc'>\n")
     f.write("<td rowspan='2'><b>Username</b></td>\n")
-    f.write("<td colspan='5'><b>Current</b></td>\n")
+    f.write("<td colspan='6'><b>Current</b></td>\n")
     f.write("<td colspan='4'><b>Recent History</b></td>\n")
     f.write("<td colspan='2'><b>Analysis</b></td>\n")
     f.write("</tr>\n")

@@ -41,6 +41,7 @@ def create_user(username):
     u['running_total_time'] = 0
     u['utilization_count'] = 0
     u['utilization_total'] = 0
+    u['request_cpus'] = 1
     u['image_size_total'] = 0
     u['disk_usage_total'] = 0
     u['hist_job_count'] = 0
@@ -78,6 +79,15 @@ def basic_user_stats():
                 users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (time.time() - float(ad['jobcurrentstartdate'])) * 100
             if 'requestmemory' in ad and not 'ifThenElse' in ad['requestmemory']:
                 users[username]['request_memory'] = float(ad['requestmemory'])
+            if 'requestcpus' in ad and not 'ifThenElse' in ad['requestcpus']:
+                if 'request_cpus' not in users[username]: 
+                    users[username]['request_cpus'] = int(ad['requestcpus'])
+                else:
+                    if int(ad['requestcpus']) > users[username]['request_cpus']:
+                        users[username]['request_cpus'] = int(ad['requestcpus'])
+            else:
+                users[username]['request_cpus'] = 1
+
 
     for ad in hist:
 
@@ -371,14 +381,18 @@ def report():
             f.write(" bgcolor='#ffee66'")
         f.write(">%.1f&nbsp;GB" % (u['disk_usage_average'] / 1024 / 1024 / 1024))
         f.write("</td>\n")
-        
+       
+        u_max = u['utilization_average'] * u['request_cpus']
         f.write("<td")
-        if u['utilization_average'] > 120:
+        if u['utilization_average'] > u_max:
             f.write(" bgcolor='#ffee66'")
         if u['utilization_average'] < 0:
             f.write(">N/A")
         else:
-            f.write(">%.1f%%</td>\n" % (u['utilization_average']))
+            f.write(">%.1f%%" % (u['utilization_average']))
+        if u['request_cpus'] > 1:
+            f.write(" (%d cores requested)" %(u['request_cpus']))
+        f.write("</td>\n")
 
         f.write("<td")
         if u['hist_job_count'] < 10:

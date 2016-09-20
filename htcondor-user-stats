@@ -382,8 +382,8 @@ def report():
         f.write(">%.1f&nbsp;GB" % (u['disk_usage_average'] / 1024 / 1024 / 1024))
         f.write("</td>\n")
        
-        u_min = 0.5 * u['utilization_average'] * u['request_cpus']
-        u_max = 1.1 * u['utilization_average'] * u['request_cpus']
+        u_min = 0.5 * 100.0 * u['request_cpus']
+        u_max = 1.1 * 100.0 * u['request_cpus']
         f.write("<td")
         if u['utilization_average'] > 0 and (u['utilization_average'] < u_min or u['utilization_average'] > u_max):
             f.write(" bgcolor='#ffee66'")

@@ -78,13 +78,22 @@ def basic_user_stats():
                 #users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (float(ad['remotewallclocktime']) + time.time() - float(ad['jobcurrentstartdate'])) * 100
                 users[username]['utilization_total'] += (float(ad['remoteusercpu']) + float(ad['remotesyscpu'])) / (time.time() - float(ad['jobcurrentstartdate'])) * 100
             if 'requestmemory' in ad and not 'ifThenElse' in ad['requestmemory']:
-                users[username]['request_memory'] = float(ad['requestmemory'])
+                try:
+                    users[username]['request_memory'] = float(ad['requestmemory'])
+                except:
+                    # do not update the dict
+                    pass
             if 'requestcpus' in ad and not 'ifThenElse' in ad['requestcpus']:
-                if 'request_cpus' not in users[username]: 
-                    users[username]['request_cpus'] = int(ad['requestcpus'])
-                else:
-                    if int(ad['requestcpus']) > users[username]['request_cpus']:
+                try:
+                    if 'request_cpus' not in users[username]: 
                         users[username]['request_cpus'] = int(ad['requestcpus'])
+                    else:
+                        if int(ad['requestcpus']) > users[username]['request_cpus']:
+                            users[username]['request_cpus'] = int(ad['requestcpus'])
+                except:
+                    # do not update the dict
+                    pass
+
             else:
                 users[username]['request_cpus'] = 1
 

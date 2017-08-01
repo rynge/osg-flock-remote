@@ -451,7 +451,7 @@ def main():
 
     for schedd_name in find_schedds():
         history_file = schedd_history_file(schedd_name)
-        q += pull_condor("queue", "/usr/bin/condor_q -name %s -long" %(schedd_name)) 
+        q += pull_condor("queue", "(/usr/bin/condor_q -nobatch -allusers -name %s -long || /usr/bin/condor_q -name %s -long)" %(schedd_name, schedd_name)) 
         if os.path.isfile(history_file):
             hist += pull_condor("history", "/usr/bin/condor_history -file %s -backwards -constraint 'CurrentTime - CompletionDate < 6*60*60' -match 5000 -l" %(history_file))
         schedd += pull_condor("schedd", "/usr/bin/condor_status -schedd -l -constraint 'Name == \"%s\"'" %(schedd_name))

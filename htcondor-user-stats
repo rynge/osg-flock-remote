@@ -182,7 +182,7 @@ def schedd_history_file(schedd):
     # strip hostname part
     schedd = re.sub('@.*', '', schedd)
 
-    cmd = 'condor_config_val SCHEDD.%s.HISTORY || condor_config_val HISTORY' %(schedd)
+    cmd = 'condor_config_val %s.HISTORY || condor_config_val SCHEDD.%s.HISTORY || condor_config_val HISTORY' %(schedd, schedd)
 
     fd, fname = tempfile.mkstemp(prefix="osg-flock-", suffix="", dir="/tmp")
     cmd = "(%s) >%s 2>/dev/null" % (cmd, fname)

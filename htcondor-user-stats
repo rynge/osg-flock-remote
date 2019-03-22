@@ -83,6 +83,12 @@ def basic_user_stats():
                 except:
                     # do not update the dict
                     pass
+            if 'requestdisk' in ad and not 'ifThenElse' in ad['requestdisk']:
+                try:
+                    users[username]['request_disk'] = float(ad['requestdisk'])
+                except:
+                    # do not update the dict
+                    pass
             if 'requestcpus' in ad and not 'ifThenElse' in ad['requestcpus']:
                 try:
                     if 'request_cpus' not in users[username]: 
@@ -389,6 +395,8 @@ def report():
         if warn:
             f.write(" bgcolor='#ffee66'")
         f.write(">%.1f&nbsp;GB" % (u['disk_usage_average'] / 1024 / 1024 / 1024))
+        if 'request_disk' in u:
+            f.write("&nbsp;(%.1f&nbsp;GB&nbsp;requested)" % (u['request_disk'] / 1024 / 1024))
         f.write("</td>\n")
        
         u_min = 0.5 * 100.0 * u['request_cpus']

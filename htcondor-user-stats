@@ -345,7 +345,7 @@ def report():
     f.write("<td><b>Running jobs</b></td>\n")
     f.write("<td><b>Average number of job starts</b></td>\n")
     f.write("<td><b>Average number of shadow starts</b></td>\n")
-    f.write("<td><b>Average image size</b></td>\n")
+    f.write("<td><b>Average memory</b></td>\n")
     f.write("<td><b>Average disk usage</b></td>\n")
     f.write("<td><b>Average utilization</b></td>\n")
     f.write("<td><b>History job count</b></td>\n")
@@ -390,7 +390,9 @@ def report():
             f.write("&nbsp;(%.1f&nbsp;GB&nbsp;requested)" % (u['request_memory'] / 1024))
         f.write("</td>\n")
         
-        warn = u['disk_usage_average'] >= 5000000000
+        warn = u['disk_usage_average'] >= 35000000000
+        if not warn and 'request_disk' in u:
+            warn = u['disk_usage_average'] / 1024 >= u['request_disk']
         f.write("<td")
         if warn:
             f.write(" bgcolor='#ffee66'")
